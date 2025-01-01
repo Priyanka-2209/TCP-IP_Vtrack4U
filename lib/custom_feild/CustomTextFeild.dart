@@ -12,7 +12,7 @@ class CustomTextField extends StatelessWidget {
   final Function(String) onChanged;
 
   const CustomTextField({
-    Key? key,
+    super.key,
     required this.hintText,
     required this.isFocused,
     required this.isEmpty,
@@ -22,7 +22,7 @@ class CustomTextField extends StatelessWidget {
     required this.textInputAction,
     required this.isDarkMode,
     required this.onChanged,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

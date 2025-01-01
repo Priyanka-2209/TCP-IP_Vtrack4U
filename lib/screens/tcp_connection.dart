@@ -1,12 +1,23 @@
+import 'dart:async';
+import 'dart:core';
+import 'dart:io';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_searchable_dropdown/flutter_searchable_dropdown.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:vtrack_for_you/custom_feild/CustomTextFeildLatLong.dart';
 
 import '../custom_feild/CustomTextFeild.dart';
 import '../list_data/provider_list.dart';
 import '../modal/provider_modal.dart';
 import '../modal/user_vehicle_modal.dart';
+import '../services/logout_service.dart';
+import '../services/provider_service.dart';
+import '../services/tcp_transaction_store_service.dart';
+import '../services/transaction_update_service.dart';
 import '../services/vehicle_service.dart';
+import '../util/snack_bar_util.dart';
 
 class TcpConnection extends StatefulWidget {
   const TcpConnection({super.key});
@@ -16,50 +27,57 @@ class TcpConnection extends StatefulWidget {
 }
 
 class _TcpConnectionState extends State<TcpConnection> {
-  bool _isLoading = false;
-  final TextEditingController _vehicleNoController = TextEditingController();
-  final TextEditingController _latController = TextEditingController();
-  final TextEditingController _longController = TextEditingController();
+  final UserVehicleService _userVehicleService = UserVehicleService();
+  final UserLogOutService _userLogOutService = UserLogOutService();
+  late ProviderService _providerService = ProviderService();
+  late TransactionUpdateService _transactionUpdateService =
+      TransactionUpdateService();
+  late TcpTransactionStore _tcpTransactionStore = TcpTransactionStore();
 
-  var focusNodeVehicleNum = FocusNode();
+  String latLongPattern = r'^\d{1,3}\.\d{7}$';
+
+  bool _isLoading = false;
+  final _imeiController = TextEditingController();
+  final _latController = TextEditingController();
+  final _longController = TextEditingController();
+
+  var focusNodeImei = FocusNode();
   var focusNodeLat = FocusNode();
   var focusNodeLong = FocusNode();
 
-  bool isFocusedVehicleNum = false;
+  bool isFocusedImei = false;
   bool isFocusedLat = false;
   bool isFocusedLong = false;
 
-  bool isEmptyVehicleNum = false;
+  bool isEmptyImei = false;
   bool isEmptyLat = false;
   bool isEmptyLong = false;
 
-  bool isVehicleNumVisible = false;
+  bool isImeiVisible = false;
   bool isLatVisible = false;
   bool isLongVisible = false;
 
-  final UserVehicleService _userVehicleService = UserVehicleService();
-
-  List<UserVehicle> _userVehicles = [];
-  String? selectedProvider;
-  String? selectedImei;
+  String? selectedProvider,
+      selectedVehicleNo,
+      selectedPortno,
+      selectedIpAddress;
 
   Map<String, String> ipAddressToPort = {};
   Map<String, String> ipAddressToState = {};
   Map<String, String> ipAddressToProviderId = {};
-  String? selectedPortno;
 
   List<String> ipAddresses = [];
+  List<UserVehicle> _userVehicles = [];
 
-  String? selectedIpAddress;
   var vehicleId = '';
 
   @override
   void initState() {
-    focusNodeVehicleNum.addListener(() {
+    focusNodeImei.addListener(() {
       setState(() {
-        isFocusedVehicleNum = focusNodeVehicleNum.hasFocus;
-        if (!isFocusedVehicleNum) {
-          isEmptyVehicleNum = _vehicleNoController.text.trim().isEmpty;
+        isFocusedImei = focusNodeImei.hasFocus;
+        if (!isFocusedImei) {
+          isEmptyImei = _imeiController.text.trim().isEmpty;
         }
       });
     });
@@ -69,6 +87,12 @@ class _TcpConnectionState extends State<TcpConnection> {
         isFocusedLat = focusNodeLat.hasFocus;
         if (!isFocusedLat) {
           isEmptyLat = _latController.text.trim().isEmpty;
+          if (!isFocusedLat && !_isValidLatLong(_latController.text)) {
+            SnackBarUtil.showSnackBar(
+              context: context,
+              message: 'Invalid latitude format. Please use: 11.1111111',
+            );
+          }
         }
       });
     });
@@ -78,61 +102,49 @@ class _TcpConnectionState extends State<TcpConnection> {
         isFocusedLong = focusNodeLong.hasFocus;
         if (!isFocusedLong) {
           isEmptyLong = _longController.text.trim().isEmpty;
+          if (!isFocusedLong && !_isValidLatLong(_longController.text)) {
+            SnackBarUtil.showSnackBar(
+              context: context,
+              message: 'Invalid longitude format. Please use: 11.1111111',
+            );
+          }
         }
       });
     });
 
     _loadUserVehicles();
+    _fetchProviders();
     super.initState();
   }
 
   Future<void> _fetchProviders() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    String token = prefs.getString('token') ?? '';
-
-    if (token.isNotEmpty) {
-      try {
-        var headers = {'Authorization': 'Bearer $token'};
-        var dio = Dio();
-        var response = await dio.request(
-          'https://absolutewebservices.in/vtrack4utcpip/api/providers',
-          options: Options(
-            method: 'GET',
-            headers: headers,
-          ),
-        );
-
-        if (response.statusCode == 200) {
-          print("Fetched Providers: ${response.data}");
-
-          setState(() {
-            var providers = response.data['providers'];
-            List<ProviderModal> providerModals = List<ProviderModal>.from(
-                providers.map((provider) => ProviderModal.fromJson(provider)));
-            ipAddressToPort.clear();
-            ipAddressToState.clear();
-            ipAddressToProviderId.clear();
-            ipAddresses.clear();
-
-            for (var provider in providerModals) {
-              ipAddressToPort[provider.ipAddress] = provider.port;
-              ipAddressToState[
-                      '${provider.ipAddress} (${provider.port})[${provider.name}]'] =
-                  '${provider.ipAddress}:${provider.port}';
-              ipAddressToProviderId['${provider.ipAddress}-${provider.port}'] =
-                  provider.id.toString();
-            }
-
-            ipAddresses = ipAddressToState.keys.toList();
-
-            print("ipAddresses List: $ipAddresses");
-          });
-        } else {
-          print(response.statusMessage);
+    try {
+      List<ProviderModal> providerModels =
+          await _providerService.fetchProviders();
+      setState(() {
+        ipAddressToPort.clear();
+        ipAddressToState.clear();
+        ipAddressToProviderId.clear();
+        ipAddresses.clear();
+        for (var provider in providerModels) {
+          ipAddressToPort[provider.ipAddress] = provider.port;
+          ipAddressToState[
+                  '${provider.ipAddress} (${provider.port})[${provider.name}]'] =
+              '${provider.ipAddress}:${provider.port}';
+          ipAddressToProviderId['${provider.ipAddress}-${provider.port}'] =
+              provider.id.toString();
         }
-      } catch (e) {
-        print("Error fetching providers: $e");
-      }
+
+        ipAddresses = ipAddressToState.keys.toList();
+
+        print("ipAddresses List: $ipAddresses");
+      });
+    } catch (e) {
+      print("Error fetching providers: $e");
+      SnackBarUtil.showSnackBar(
+        context: context,
+        message: 'Error fetching providers: $e',
+      );
     }
   }
 
@@ -141,6 +153,11 @@ class _TcpConnectionState extends State<TcpConnection> {
     setState(() {
       _userVehicles = vehicles;
     });
+  }
+
+  bool _isValidLatLong(String value) {
+    RegExp regExp = RegExp(latLongPattern);
+    return regExp.hasMatch(value);
   }
 
   @override
@@ -155,17 +172,23 @@ class _TcpConnectionState extends State<TcpConnection> {
       resizeToAvoidBottomInset: true,
       appBar: AppBar(
         automaticallyImplyLeading: false,
-        toolbarHeight: screenHeight * 0.13,
+        toolbarHeight: screenHeight * 0.10,
         backgroundColor: const Color(0xFF123456),
-        leading: IconButton(
-            onPressed: () {
-              Navigator.pushNamedAndRemoveUntil(
-                  context, '/dashboard', (route) => false);
-            },
-            icon: Icon(
-              Icons.arrow_back_ios,
-              color: Colors.white,
-            )),
+        actions: [
+          IconButton(
+              onPressed: () async {
+                SharedPreferences prefs = await SharedPreferences.getInstance();
+                String token = prefs.getString('token') ?? '';
+                await _userLogOutService.logout_user(token, context);
+                prefs.clear();
+                Navigator.pushNamedAndRemoveUntil(
+                    context, '/login', (route) => false);
+              },
+              icon: Icon(
+                Icons.logout,
+                color: Colors.white,
+              ))
+        ],
         title: Container(
           alignment: Alignment.bottomLeft,
           width: double.infinity,
@@ -195,44 +218,54 @@ class _TcpConnectionState extends State<TcpConnection> {
         ),
         child: SingleChildScrollView(
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SizedBox(
-                child: DropdownButtonFormField<String>(
-                  value: selectedImei,
-                  hint: const Text(
-                    'Select IMEI',
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                  items: _userVehicles.map((vehicle) {
-                    return DropdownMenuItem<String>(
-                      value: vehicle.imeiNumber,
-                      child: Text(vehicle.imeiNumber),
-                    );
-                  }).toList(),
-                  onChanged: (String? newImei) {
-                    setState(() {
-                      selectedImei = newImei;
-
-                      UserVehicle? selectedVehicle = _userVehicles.firstWhere(
-                        (vehicle) => vehicle.imeiNumber == newImei,
+              Container(
+                height: screenHeight * 0.07,
+                decoration: BoxDecoration(
+                  border: Border.all(color: Color(0xFF123456)),
+                  borderRadius: BorderRadius.circular(5.0),
+                ),
+                child: SingleChildScrollView(
+                  child: SearchableDropdown.single(
+                    items: _userVehicles.map((vehicle) {
+                      return DropdownMenuItem<String>(
+                        value: vehicle.vehNumber,
+                        child: Text(vehicle.vehNumber),
                       );
-
-                      if (selectedVehicle != null) {
-                        _vehicleNoController.text =
-                            selectedVehicle.vehNumber ?? '';
-                      } else {
-                        _vehicleNoController.clear();
-                      }
-                    });
-                  },
-                  decoration: InputDecoration(
-                    contentPadding:
-                        const EdgeInsets.symmetric(vertical: 5, horizontal: 10),
-                    border: OutlineInputBorder(
-                      borderSide:
-                          BorderSide(color: Color(0xFF123456), width: 1),
+                    }).toList(),
+                    value: selectedVehicleNo,
+                    hint: const Text(
+                      'Select Vehicle',
+                      style: TextStyle(color: Colors.grey),
                     ),
+                    searchHint: "Search Vehicle",
+                    onChanged: (String? newVehNo) {
+                      setState(() {
+                        selectedVehicleNo = newVehNo;
+
+                        UserVehicle? selectedImei = _userVehicles.firstWhere(
+                          (vehicle) => vehicle.vehNumber == newVehNo,
+                          orElse: () => UserVehicle(
+                            vehNumber: '',
+                            imeiNumber: '',
+                            id: 0,
+                            userId: 0,
+                            gpsDeviceType: '',
+                          ),
+                        );
+
+                        if (selectedImei != null) {
+                          _imeiController.text = selectedImei.imeiNumber ?? '';
+                        } else {
+                          _imeiController.clear();
+                        }
+                      });
+                    },
+                    clearIcon: Icon(Icons.clear),
+                    closeButton: "close",
+                    isExpanded: true,
+                    dialogBox: true,
+                    menuBackgroundColor: Colors.white,
                   ),
                 ),
               ),
@@ -240,24 +273,24 @@ class _TcpConnectionState extends State<TcpConnection> {
               Container(
                 margin: EdgeInsets.only(bottom: screenHeight * 0.005),
                 child: CustomTextField(
-                  hintText: 'Enter Vehicle Number',
-                  isFocused: isFocusedVehicleNum,
-                  isEmpty: isEmptyVehicleNum,
-                  controller: _vehicleNoController,
+                  hintText: 'Enter IMEI Number',
+                  isFocused: isFocusedImei,
+                  isEmpty: isEmptyImei,
+                  controller: _imeiController,
                   keyboardType: TextInputType.text,
                   textInputAction: TextInputAction.next,
                   isDarkMode: isDarkMode,
                   onChanged: (value) {
                     setState(() {
-                      isEmptyVehicleNum = value.trim().isEmpty;
+                      isEmptyImei = value.trim().isEmpty;
                     });
                   },
-                  focusNode: focusNodeVehicleNum,
+                  focusNode: focusNodeImei,
                 ),
               ),
               Container(
                 margin: EdgeInsets.only(bottom: screenHeight * 0.005),
-                child: CustomTextField(
+                child: CustomTextFieldLatLong(
                   hintText: 'Enter Latitude',
                   isFocused: isFocusedLat,
                   isEmpty: isEmptyLat,
@@ -275,12 +308,12 @@ class _TcpConnectionState extends State<TcpConnection> {
               ),
               Container(
                 margin: EdgeInsets.only(bottom: screenHeight * 0.005),
-                child: CustomTextField(
-                  hintText: 'Enter Latitude',
+                child: CustomTextFieldLatLong(
+                  hintText: 'Enter Longitude',
                   isFocused: isFocusedLong,
                   isEmpty: isEmptyLong,
                   controller: _longController,
-                  keyboardType: TextInputType.number,
+                  keyboardType: TextInputType.numberWithOptions(decimal: true),
                   textInputAction: TextInputAction.next,
                   isDarkMode: isDarkMode,
                   onChanged: (value) {
@@ -329,15 +362,14 @@ class _TcpConnectionState extends State<TcpConnection> {
               SizedBox(
                 child: DropdownButtonFormField<String>(
                   value: selectedIpAddress,
-                  // Should now store the combined value (IP:Port)
                   hint: const Text(
                     'Select IP Address',
                     style: TextStyle(color: Colors.grey),
                   ),
                   items: ipAddressToState.entries.map((entry) {
                     return DropdownMenuItem<String>(
-                      value: entry.value, // Combined IP and Port
-                      child: Text(entry.key), // Display "IP:Port {Name}"
+                      value: entry.value,
+                      child: Text(entry.key),
                     );
                   }).toList(),
                   onChanged: (String? newValue) {
@@ -373,95 +405,97 @@ class _TcpConnectionState extends State<TcpConnection> {
                     style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                   ),
                 ),
-              Container(
-                margin: EdgeInsets.only(top: screenHeight * 0.02),
-                child: Center(
-                  child: ElevatedButton(
-                    onPressed: _isLoading
-                        ? null
-                        : () async {
-                            if (_vehicleNoController.text.trim().isEmpty ||
-                                _latController.text.trim().isEmpty ||
-                                _longController.text.trim().isEmpty) {
-                              setState(() {
-                                isEmptyVehicleNum =
-                                    _vehicleNoController.text.trim().isEmpty;
-                                isEmptyLat = _latController.text.trim().isEmpty;
-                                isEmptyLong =
-                                    _longController.text.trim().isEmpty;
-                              });
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  backgroundColor: Colors.red,
-                                  behavior: SnackBarBehavior.floating,
-                                  content: Text('Fields are empty'),
-                                ),
-                              );
-                            } else {
-                              setState(() {
-                                _isLoading = true; // Start loading
-                              });
-
-                              try {
-                                await sendString(); // Perform the operation
-                              } finally {
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                Container(
+                  margin: EdgeInsets.only(top: screenHeight * 0.02),
+                  child: Center(
+                    child: ElevatedButton(
+                      onPressed: _isLoading
+                          ? null
+                          : () async {
+                              if (_imeiController.text.trim().isEmpty ||
+                                  _latController.text.trim().isEmpty ||
+                                  _longController.text.trim().isEmpty) {
                                 setState(() {
-                                  _isLoading = false; // Stop loading
+                                  isEmptyImei =
+                                      _imeiController.text.trim().isEmpty;
+                                  isEmptyLat =
+                                      _latController.text.trim().isEmpty;
+                                  isEmptyLong =
+                                      _longController.text.trim().isEmpty;
                                 });
-                              }
+                                SnackBarUtil.showSnackBar(
+                                  context: context,
+                                  message: 'Fields are empty',
+                                );
+                              } else {
+                                setState(() {
+                                  _isLoading = true;
+                                });
 
-                              // String? ip = selectedIpAddress?.split(':')[0];
-                              // if (ip != null && selectedPort != null) {
-                              //   try {
-                              //     Socket socket = await Socket.connect(
-                              //         ip, int.parse(selectedPort!));
-                              //     print(
-                              //         'Connected to: Remote ${socket.address}:${socket.remotePort}');
-                              //     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                              //       content: Text(
-                              //         'Connection Established',
-                              //         style: TextStyle(color: Colors.white),
-                              //       ),
-                              //       backgroundColor: Colors.green,
-                              //       behavior: SnackBarBehavior.floating,
-                              //     ));
-                              //     try {
-                              //       await sendString(); // Perform the operation
-                              //     } finally {
-                              //       setState(() {
-                              //         _isLoading = false; // Stop loading
-                              //       });
-                              //     }
-                              //     socket.destroy(); // Close the socket after use
-                              //   } catch (e) {
-                              //     print(
-                              //         'Error connecting to $selectedIpAddress:$selectedPort - $e');
-                              //   }
-                              // } else {
-                              //   print(
-                              //       'IP Address or Port is null. Ensure both are selected.');
-                              // }
-                            }
-                          },
-                    child: _isLoading
-                        ? CircularProgressIndicator(
-                            color: Color(0xFF123456),
-                          )
-                        : Text(
-                            'Send String',
-                            style: TextStyle(
-                              color: Colors.white,
+                                try {
+                                  await sendString();
+                                } finally {
+                                  setState(() {
+                                    _isLoading = false;
+                                  });
+                                }
+                              }
+                            },
+                      child: _isLoading
+                          ? CircularProgressIndicator(
+                              color: Color(0xFF123456),
+                            )
+                          : Text(
+                              'Send String',
+                              style: TextStyle(
+                                color: Colors.white,
+                              ),
                             ),
-                          ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Color(0xFF123456),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(6),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Color(0xFF123456),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(6),
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
+                Container(
+                  margin: EdgeInsets.only(top: screenHeight * 0.02),
+                  child: Center(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        setState(() {
+                          _imeiController.clear();
+                          _latController.clear();
+                          _longController.clear();
+                          selectedProvider = null;
+                          selectedVehicleNo = null;
+                          selectedIpAddress = null;
+                          selectedPortno = null;
+                        });
+                      },
+                      child: _isLoading
+                          ? CircularProgressIndicator(
+                              color: Color(0xFF123456),
+                            )
+                          : Text(
+                              'Clear Form',
+                              style: TextStyle(
+                                color: Colors.white,
+                              ),
+                            ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Color(0xFF123456),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ]),
             ],
           ),
         ),
@@ -470,205 +504,142 @@ class _TcpConnectionState extends State<TcpConnection> {
   }
 
   Future<void> sendString() async {
-    var dio = Dio();
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    String token = await prefs.getString('token') ?? '';
-    final String url =
-        'https://absolutewebservices.in/vtrack4utcpip/api/tcptransactions';
-    try {
-      String selectedIp = selectedIpAddress?.split(':')[0] ?? '';
-      String? selectedPort =
-          selectedIpAddress?.split(':')[1] ?? ''; // Extracting the port
+    String selectedIp = selectedIpAddress?.split(':')[0] ?? '';
+    String? selectedPort = selectedIpAddress?.split(':')[1] ?? '';
+    String ipPortKey = '$selectedIp-$selectedPort';
 
-      String ipPortKey = '$selectedIp-$selectedPort';
-      print('ipPortKey: $ipPortKey');
+    print('ipPortKey: $ipPortKey');
+    print('IMEI No: ${_imeiController.text}');
+    print('selectedIp: $selectedIp');
+    print('selectedPort: $selectedPort');
+    print('ipAddresstoProviderID: $ipAddressToProviderId');
 
-      print('selectedIp: $selectedIp');
-      print('selectedPort: $selectedPort');
-      print('ipAddresstoProviderID: $ipAddressToProviderId');
+    String providerId = ipAddressToProviderId[ipPortKey] ?? '';
+    print('providerId: $providerId');
 
-      String providerId = ipAddressToProviderId[ipPortKey] ?? '';
-      if (providerId.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-            content: Text('Provider ID not found for IP address: $selectedIp'),
-          ),
-        );
-        return;
-      }
-
-      UserVehicle? selectedVehicle = _userVehicles.firstWhere(
-        (vehicle) => vehicle.imeiNumber == selectedImei,
+    if (providerId.isEmpty) {
+      SnackBarUtil.showSnackBar(
+        context: context,
+        message: 'Provider ID not found for IP address: $selectedIp',
       );
-
-      if (selectedVehicle == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-            content: Text('No vehicle found with the provided IMEI.'),
-          ),
-        );
-        return;
-      }
-
-      String vehicleId = selectedVehicle.id.toString();
-      print('VehicleID: $vehicleId');
-      final response = await dio.post(
-        url,
-        data: {
-          "user_vehicle_details_id": vehicleId,
-          "message_data": "test",
-          "latitude": _latController.text,
-          "logitude": _longController.text,
-          "provider_id": providerId,
-          "service_type": selectedProvider
-        },
-        options: Options(
-          validateStatus: (status) {
-            return status != null && status < 500;
-          },
-          headers: {
-            'Authorization': 'Bearer $token',
-            'Content-Type': 'application/json',
-          },
-        ),
-      );
-
-      if (response.statusCode == 200) {
-        String successMessage = response.data['message'];
-        String status = response.data['tcp_data']['status'];
-        int id = response.data['tcp_data']['id'];
-        print('Status : $status');
-        print('id : $id');
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              backgroundColor: Colors.green,
-              behavior: SnackBarBehavior.floating,
-              content: Text(
-                successMessage,
-                style: TextStyle(color: Colors.white),
-              )),
-        );
-        await transactionUpdate(id);
-
-        setState(() {
-          _vehicleNoController.clear();
-          _latController.clear();
-          _longController.clear();
-          selectedProvider = null;
-          selectedImei = null;
-          selectedIpAddress = null;
-          selectedPortno = null;
-        });
-      } else {
-        print('Server response status: ${response.statusCode}');
-        print('Server response data: ${response.data}');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              backgroundColor: Colors.red,
-              behavior: SnackBarBehavior.floating,
-              content: Text('Failed to update data: ${response.data}')),
-        );
-      }
-    } on DioError catch (e) {
-      print('DioError: ${e.response?.statusCode} - ${e.response?.data}');
-      print(e.message);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-            content: Text('Error: ${e.message}')),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            backgroundColor: Colors.red,
-            content: Text('An unexpected error occurred: $e')),
-      );
-    }
-  }
-
-  Future<void> transactionUpdate(int id) async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    String token = prefs.getString('token') ?? '';
-
-    if (token.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-          content: Text('Authentication token not found. Please login again.'),
-        ),
-      );
+      // setState(() {
+      //   _isLoading = false; // Stop loading
+      // });
       return;
     }
 
-    var headers = {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer $token',
-    };
+    UserVehicle? selectedVehicle = _userVehicles.firstWhere(
+      (vehicle) => vehicle.vehNumber == selectedVehicleNo,
+    );
 
-    var data = {"status": "Success"};
-
-    var dio = Dio();
-    final String url =
-        'https://absolutewebservices.in/vtrack4utcpip/api/tcptransactionsupdatebyid/$id';
+    if (selectedVehicle == null) {
+      SnackBarUtil.showSnackBar(
+        context: context,
+        message: 'No vehicle found with the provided IMEI.',
+      );
+      setState(() {
+        _isLoading = false;
+      });
+      return;
+    }
+    String vehicleId = selectedVehicle.id.toString();
+    setState(() {
+      _isLoading = true;
+    });
 
     try {
-      var response = await dio.post(
-        url,
-        options: Options(
-          headers: headers,
-        ),
-        data: data,
-      );
+      final response = await _tcpTransactionStore.storeTransaction(
+          vehicleId: vehicleId,
+          latitude: _latController.text,
+          longitude: _longController.text,
+          providerId: providerId,
+          serviceType: selectedProvider!);
+      print('response:::: $response[data]');
 
-      if (response.statusCode == 200) {
-        String successMessage = response.data['message'];
-        print('Transaction Update Response: ${response.data}');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
-            content: Text(
-              successMessage,
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
-        );
+      if (response['success']) {
+        Map<String, dynamic> tcpData = response['tcpData'];
+        String msgData = tcpData['message_data'];
+        int id = tcpData['id'];
+        String status = '';
+
+        // //open socket code
+        // bool socketSuccess = await sendToTcpSocket(msgData, selectedIp, selectedPort);
+        // if (socketSuccess) {
+        //   await transactionUpdate(id, status = 'Success');
+        //   print("Sucess Status: $status");
+        // } else {
+        //   await transactionUpdate(id, status = 'fail');
+        //   print("Fail Status: $status");
+        // }
+
+        // close socket code
+        await transactionUpdate(id, status = 'Success');
       } else {
-        print('Failed to update transaction: ${response.statusMessage}');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-            content: Text(
-              'Failed to update transaction. Please try again.',
-            ),
-          ),
+        SnackBarUtil.showSnackBar(
+          context: context,
+          message: response['message'],
         );
       }
+    } catch (e) {
+      SnackBarUtil.showSnackBar(
+        context: context,
+        message: 'An unexpected error occurred: $e',
+      );
+    } finally {
+      setState(() {
+        _isLoading = false; // Stop loading in all cases
+      });
+    }
+  }
+
+  Future<bool> sendToTcpSocket(String msgData, String ip, String? port) async {
+    try {
+      int? portNumber = int.tryParse(port!);
+      // int? portNumber = 2022;
+      Socket socket = await Socket.connect(ip, portNumber!)
+          .timeout(Duration(minutes: 1), onTimeout: () {
+        throw TimeoutException('Connection timeout. Please try again.');
+      });
+      socket.write(msgData);
+      await socket.flush();
+      await socket.close();
+      return true;
+    } on TimeoutException catch (e) {
+      SnackBarUtil.showSnackBar(
+        context: context,
+        message: 'Connection timeout. Please try again.',
+      );
+      return false;
+    } catch (e) {
+      SnackBarUtil.showSnackBar(
+        context: context,
+        message: 'Error: Unable to connect to TCP server',
+      );
+      return false;
+    }
+  }
+
+  Future<void> transactionUpdate(int id, String status) async {
+    try {
+      String successMessage = await _transactionUpdateService.transactionUpdate(
+          id, status, context);
+      print('Transaction Update Response: $status}');
+      SnackBarUtil.showSnackBar(
+        context: context,
+        message: successMessage,
+        backgroundColor: Colors.green,
+      );
     } on DioError catch (e) {
       print('DioError during transaction update: ${e.response?.data}');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-          content: Text('Error updating transaction: ${e.message}'),
-        ),
+      SnackBarUtil.showSnackBar(
+        context: context,
+        message: 'Error updating transaction: ${e.message}',
       );
     } catch (e) {
       print('Unexpected error: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-          content: Text('An unexpected error occurred: $e'),
-        ),
+      SnackBarUtil.showSnackBar(
+        context: context,
+        message: 'An unexpected error occurred: $e',
       );
     }
   }

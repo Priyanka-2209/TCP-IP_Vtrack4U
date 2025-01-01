@@ -13,7 +13,7 @@ class CustomTextFieldLatLong extends StatelessWidget {
   final Function(String) onChanged;
 
   const CustomTextFieldLatLong({
-    Key? key,
+    super.key,
     required this.hintText,
     required this.isFocused,
     required this.isEmpty,
@@ -23,7 +23,7 @@ class CustomTextFieldLatLong extends StatelessWidget {
     required this.textInputAction,
     required this.isDarkMode,
     required this.onChanged,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

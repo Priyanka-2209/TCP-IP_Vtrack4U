@@ -1,9 +1,10 @@
-import 'dart:convert';
-
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:vtrack_for_you/screens/dashboard.dart';
+import 'package:vtrack_for_you/screens/tcp_connection.dart';
+import 'package:vtrack_for_you/services/login_service.dart';
+
+import '../util/snack_bar_util.dart';
 
 class Login extends StatefulWidget {
   const Login({super.key});
@@ -13,6 +14,8 @@ class Login extends StatefulWidget {
 }
 
 class _LoginState extends State<Login> {
+  final LoginService _loginService = LoginService();
+
   TextEditingController emailController = TextEditingController();
   TextEditingController passwordController = TextEditingController();
 
@@ -33,6 +36,8 @@ class _LoginState extends State<Login> {
   String password = '';
 
   bool _isLoading = false;
+
+  String appVersion = '';
 
   @override
   void initState() {
@@ -79,6 +84,15 @@ class _LoginState extends State<Login> {
         });
       }
     });
+
+    _getAppVersion();
+  }
+
+  Future<void> _getAppVersion() async {
+    final packageInfo = await PackageInfo.fromPlatform();
+    setState(() {
+      appVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
+    });
   }
 
   Future<void> loginUser() async {
@@ -86,8 +100,9 @@ class _LoginState extends State<Login> {
     String password = passwordController.text.trim();
 
     if (email.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Please enter email and password")),
+      SnackBarUtil.showSnackBar(
+        context: context,
+        message: "Please enter email and password",
       );
       return;
     }
@@ -96,105 +111,16 @@ class _LoginState extends State<Login> {
       _isLoading = true;
     });
 
-    try {
-      var dio = Dio();
-      var headers = {
-        'Content-Type': 'application/json',
-      };
-      var data = json.encode({
-        "email": email,
-        "password": password,
-      });
-      var response = await dio.request(
-        'https://absolutewebservices.in/vtrack4utcpip/api/userlogin',
-        options: Options(
-          method: 'POST',
-          headers: headers,
-        ),
-        data: data,
-      );
+    bool successLogin = await _loginService.loginUser(email, password, context);
 
-      if (response.statusCode == 200) {
-        var responseData = response.data;
-        if (responseData['success'] == true) {
-          SharedPreferences prefs = await SharedPreferences.getInstance();
-          await prefs.setString('token', responseData['data']['token']);
-          await prefs.setString('email', email);
-          await prefs.setString('password', password);
-          await prefs.setBool('isLoggedIn', true);
+    if (successLogin) {
+      Navigator.pushReplacement(
+          context, MaterialPageRoute(builder: (context) => TcpConnection()));
+    }
 
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (context) => Dashboard()),
-          );
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                responseData['message'],
-                style: TextStyle(color: Colors.white),
-              ),
-              behavior: SnackBarBehavior.floating,
-              backgroundColor: Colors.green,
-              duration: Duration(seconds: 1),
-            ),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-                content: Text(
-                  'Login failed: ${responseData['message']}',
-                  style: TextStyle(color: Colors.white),
-                ),
-                behavior: SnackBarBehavior.floating,
-                backgroundColor: Colors.red,
-                duration: Duration(seconds: 1)),
-          );
-        }
-      }
-      else if (response.statusCode == 401) {
-        var responseData = response.data;
-        String errorMessage = responseData['message'] ?? 'Unauthorized Access';
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              errorMessage,
-              style: TextStyle(color: Colors.white),
-            ),
-            behavior: SnackBarBehavior.floating,
-            backgroundColor: Colors.red,
-            duration: Duration(seconds: 1),
-          ),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(
-                'Error: ${response.statusMessage}',
-                style: TextStyle(color: Colors.white),
-              ),
-              behavior: SnackBarBehavior.floating,
-              backgroundColor: Colors.red,
-              duration: Duration(seconds: 1)),
-        );
-      }
-    }
-    catch (e) {
-      print('Error: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text(
-              'You have entered wrong credentials.',
-              style: TextStyle(color: Colors.white),
-            ),
-            behavior: SnackBarBehavior.floating,
-            backgroundColor: Colors.red,
-            duration: Duration(seconds: 1)),
-      );
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
-    }
+    setState(() {
+      _isLoading = false;
+    });
   }
 
   void _checkLoginStatus() async {
@@ -211,7 +137,7 @@ class _LoginState extends State<Login> {
 
       _isChecked = true;
       Navigator.pushReplacement(
-          context, MaterialPageRoute(builder: (context) => Dashboard()));
+          context, MaterialPageRoute(builder: (context) => TcpConnection()));
     }
   }
 
@@ -383,7 +309,8 @@ class _LoginState extends State<Login> {
                         style: TextStyle(color: Colors.white),
                       ),
               ),
-            )
+            ),
+            Text('Version: $appVersion')
           ],
         ),
       ),

@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 
+import '../Global_API_Var/constant.dart';
 import '../modal/fetch_user_data_modal.dart';
 
 class UserService {
@@ -12,7 +13,7 @@ class UserService {
 
     try {
       var response = await dio.get(
-        'https://absolutewebservices.in/vtrack4utcpip/api/getuserinfo',
+        '${ApiConstants.baseUrl}getuserinfo',
         options: Options(headers: headers),
       );
 

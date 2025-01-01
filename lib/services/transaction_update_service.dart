@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../Global_API_Var/constant.dart';
+import '../util/snack_bar_util.dart';
 
 class TransactionUpdateService {
   Future<String> transactionUpdate(int id, String status,
@@ -12,13 +13,9 @@ class TransactionUpdateService {
 
     print('Status: $status');
     if (token.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-          duration: Duration(seconds: 5),
-          content: Text('Authentication token not found. Please login again.'),
-        ),
+      SnackBarUtil.showSnackBar(
+        context: context,
+        message: 'Authentication token not found. Please login again.',
       );
       throw Exception('Authentication token not found. Please login again.');
     }

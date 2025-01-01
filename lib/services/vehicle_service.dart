@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../Global_API_Var/constant.dart';
 import '../modal/user_vehicle_modal.dart';
 
 class UserVehicleService {
@@ -12,7 +13,7 @@ class UserVehicleService {
         var headers = {'Authorization': 'Bearer $token'};
         var dio = Dio();
         var response = await dio.request(
-          'https://absolutewebservices.in/vtrack4utcpip/api/user_vehicle',
+          '${ApiConstants.baseUrl}user_vehicle',
           options: Options(
             method: 'GET',
             headers: headers,
