@@ -266,51 +266,58 @@ class _LoginState extends State<Login> {
                 ),
               ],
             ),
-            SizedBox(
-              width: screenWidth * 0.95,
-              height: screenHeight * 0.06,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF123456)),
-                onPressed: _isLoading
-                    ? null
-                    : () async {
-                        if (emailController.text.trim().isEmpty) {
-                          setState(() {
-                            emailError = 'Email Address cannot be empty';
-                          });
-                        }
-                        if (passwordController.text.trim().isEmpty) {
-                          setState(() {
-                            passwordError = 'Password cannot be empty';
-                          });
-                        }
-                        if (emailError.isEmpty && passwordError.isEmpty) {
-                          setState(() {
-                            _isLoading = true;
-                          });
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: screenWidth * 0.95,
+                  height: screenHeight * 0.06,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF123456)),
+                    onPressed: _isLoading
+                        ? null
+                        : () async {
+                            if (emailController.text.trim().isEmpty) {
+                              setState(() {
+                                emailError = 'Email Address cannot be empty';
+                              });
+                            }
+                            if (passwordController.text.trim().isEmpty) {
+                              setState(() {
+                                passwordError = 'Password cannot be empty';
+                              });
+                            }
+                            if (emailError.isEmpty && passwordError.isEmpty) {
+                              setState(() {
+                                _isLoading = true;
+                              });
 
-                          await Future.delayed(Duration(seconds: 2));
+                              await Future.delayed(Duration(seconds: 2));
 
-                          loginUser();
-                        } else {
-                          setState(() {
-                            _isLoading = false;
-                          });
-                        }
-                      },
-                child: _isLoading
-                    ? const CircularProgressIndicator(
-                        color: Colors.white,
-                        backgroundColor: Color(0xFF123456),
-                      )
-                    : const Text(
-                        'Sign In',
-                        style: TextStyle(color: Colors.white),
-                      ),
-              ),
+                              loginUser();
+                            } else {
+                              setState(() {
+                                _isLoading = false;
+                              });
+                            }
+                          },
+                    child: _isLoading
+                        ? const CircularProgressIndicator(
+                            color: Colors.white,
+                            backgroundColor: Color(0xFF123456),
+                          )
+                        : const Text(
+                            'Sign In',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                  ),
+                ),
+                SizedBox(height: screenHeight * 0.01,),
+                Text('Version: $appVersion', style: TextStyle(color: Colors.grey),)
+              ],
             ),
-            Text('Version: $appVersion')
+
           ],
         ),
       ),

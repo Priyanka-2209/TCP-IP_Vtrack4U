@@ -574,6 +574,7 @@ class _TcpConnectionState extends State<TcpConnection> {
 
         // close socket code
         await transactionUpdate(id, status = 'Success');
+
       } else {
         SnackBarUtil.showSnackBar(
           context: context,
