@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vtrack_for_you/screens/tcp_connection.dart';
 import 'package:vtrack_for_you/services/login_service.dart';
 
@@ -43,8 +42,7 @@ class _LoginState extends State<Login> {
   void initState() {
     super.initState();
 
-    _checkLoginStatus();
-
+    _initialize();
     focusNodeEmail.addListener(() {
       setState(() {
         isFocusedEmail = focusNodeEmail.hasFocus;
@@ -88,34 +86,49 @@ class _LoginState extends State<Login> {
     _getAppVersion();
   }
 
-  Future<void> _getAppVersion() async {
-    final packageInfo = await PackageInfo.fromPlatform();
-    setState(() {
-      appVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
-    });
+  Future<void> _initialize() async {
+    var loginStatus = await _loginService.checkLoginStatus();
+    if (loginStatus['isLoggedIn'] == true) {
+      setState(() {
+        emailController.text = loginStatus['email'] ?? '';
+        passwordController.text = loginStatus['password'] ?? '';
+        _isChecked = loginStatus['email'] != null;
+      });
+
+    } else {
+      setState(() {
+        emailController.text = loginStatus['email'] ?? '';
+        passwordController.text = loginStatus['password'] ?? '';
+        _isChecked = loginStatus['email'] != null;
+      });
+    }
   }
 
-  Future<void> loginUser() async {
-    String email = emailController.text.trim();
-    String password = passwordController.text.trim();
-
-    if (email.isEmpty || password.isEmpty) {
-      SnackBarUtil.showSnackBar(
-        context: context,
-        message: "Please enter email and password",
-      );
-      return;
-    }
-
+  Future<void> _handleLogin() async {
     setState(() {
       _isLoading = true;
     });
 
-    bool successLogin = await _loginService.loginUser(email, password, context);
+    bool success = await _loginService.loginService(
+      emailController.text.trim(),
+      passwordController.text.trim(),
+      context,
+    );
 
-    if (successLogin) {
+
+    if (success) {
+      await _loginService.saveRememberMe(
+        _isChecked!,
+        emailController.text.trim(),
+        passwordController.text.trim(),
+      );
+
       Navigator.pushReplacement(
           context, MaterialPageRoute(builder: (context) => TcpConnection()));
+    } else {
+      SnackBarUtil.showSnackBar(
+        context: context,
+        message: "Login failed. Please check your credentials.",);
     }
 
     setState(() {
@@ -123,22 +136,12 @@ class _LoginState extends State<Login> {
     });
   }
 
-  void _checkLoginStatus() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    bool isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
-    bool rememberMe = prefs.getBool('rememberMe') ?? false;
 
-    if (isLoggedIn && rememberMe) {
-      String savedEmail = prefs.getString('email') ?? '';
-      String savedPassword = prefs.getString('password') ?? '';
-
-      emailController.text = savedEmail;
-      passwordController.text = savedPassword;
-
-      _isChecked = true;
-      Navigator.pushReplacement(
-          context, MaterialPageRoute(builder: (context) => TcpConnection()));
-    }
+  Future<void> _getAppVersion() async {
+    final packageInfo = await PackageInfo.fromPlatform();
+    setState(() {
+      appVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
+    });
   }
 
   @override
@@ -295,7 +298,7 @@ class _LoginState extends State<Login> {
 
                               await Future.delayed(Duration(seconds: 2));
 
-                              loginUser();
+                              _handleLogin();
                             } else {
                               setState(() {
                                 _isLoading = false;

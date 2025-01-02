@@ -34,7 +34,8 @@ class _TcpConnectionState extends State<TcpConnection> {
       TransactionUpdateService();
   late TcpTransactionStore _tcpTransactionStore = TcpTransactionStore();
 
-  String latLongPattern = r'^\d{1,3}\.\d{7}$';
+
+  String latLongPattern = r'^\d{1,3}\.\d{3,7}$';
 
   bool _isLoading = false;
   final _imeiController = TextEditingController();
@@ -90,7 +91,7 @@ class _TcpConnectionState extends State<TcpConnection> {
           if (!isFocusedLat && !_isValidLatLong(_latController.text)) {
             SnackBarUtil.showSnackBar(
               context: context,
-              message: 'Invalid latitude format. Please use: 11.1111111',
+              message: 'Invalid input! Please enter a number with 2 digits before the decimal and 4-7 digits after.',
             );
           }
         }
@@ -105,7 +106,7 @@ class _TcpConnectionState extends State<TcpConnection> {
           if (!isFocusedLong && !_isValidLatLong(_longController.text)) {
             SnackBarUtil.showSnackBar(
               context: context,
-              message: 'Invalid longitude format. Please use: 11.1111111',
+              message: 'Invalid input! Please enter a number with 2 digits before the decimal and 4-7 digits after.',
             );
           }
         }
@@ -155,8 +156,9 @@ class _TcpConnectionState extends State<TcpConnection> {
     });
   }
 
+
   bool _isValidLatLong(String value) {
-    RegExp regExp = RegExp(latLongPattern);
+    RegExp regExp = RegExp(r'^\d{0,2}(\.\d{4,7})?$');
     return regExp.hasMatch(value);
   }
 
@@ -180,7 +182,14 @@ class _TcpConnectionState extends State<TcpConnection> {
                 SharedPreferences prefs = await SharedPreferences.getInstance();
                 String token = prefs.getString('token') ?? '';
                 await _userLogOutService.logout_user(token, context);
-                prefs.clear();
+
+                bool rememberMe = prefs.getBool('rememberMe') ?? false;
+                if(rememberMe == true) {
+                  prefs.remove('isLoggedIn');
+                } else {
+                  prefs.clear();
+                }
+
                 Navigator.pushNamedAndRemoveUntil(
                     context, '/login', (route) => false);
               },
@@ -522,9 +531,6 @@ class _TcpConnectionState extends State<TcpConnection> {
         context: context,
         message: 'Provider ID not found for IP address: $selectedIp',
       );
-      // setState(() {
-      //   _isLoading = false; // Stop loading
-      // });
       return;
     }
 
@@ -562,18 +568,18 @@ class _TcpConnectionState extends State<TcpConnection> {
         int id = tcpData['id'];
         String status = '';
 
-        // //open socket code
-        // bool socketSuccess = await sendToTcpSocket(msgData, selectedIp, selectedPort);
-        // if (socketSuccess) {
-        //   await transactionUpdate(id, status = 'Success');
-        //   print("Sucess Status: $status");
-        // } else {
-        //   await transactionUpdate(id, status = 'fail');
-        //   print("Fail Status: $status");
-        // }
+        //open socket code
+        bool socketSuccess = await sendToTcpSocket(msgData, selectedIp, selectedPort);
+        if (socketSuccess) {
+          await transactionUpdate(id, status = 'Success');
+          print("Sucess Status: $status");
+        } else {
+          await transactionUpdate(id, status = 'fail');
+          print("Fail Status: $status");
+        }
 
         // close socket code
-        await transactionUpdate(id, status = 'Success');
+        // await transactionUpdate(id, status = 'Success');
 
       } else {
         SnackBarUtil.showSnackBar(

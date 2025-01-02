@@ -8,7 +8,8 @@ import '../Global_API_Var/constant.dart';
 import '../util/snack_bar_util.dart';
 
 class LoginService {
-  Future<bool> loginUser(
+
+  Future<bool> loginService(
       String email, String password, BuildContext context) async {
     try {
       var dio = Dio();
@@ -37,10 +38,7 @@ class LoginService {
           await prefs.setString('password', password);
           await prefs.setBool('isLoggedIn', true);
 
-          // Navigator.pushReplacement(
-          //   context,
-          //   MaterialPageRoute(builder: (context) => TcpConnection()),
-          // );
+          await prefs.setInt('loginTimestamp', DateTime.now().millisecondsSinceEpoch);
 
           SnackBarUtil.showSnackBar(
               context: context,
@@ -76,5 +74,47 @@ class LoginService {
               : 'An unexpected error occurred. Please try again.',);
       return false;
     }
+
+  }
+
+  Future<void> saveRememberMe(bool value, String email, String password) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('rememberMe', value);
+    if (value) {
+      await prefs.setString('email', email);
+      await prefs.setString('password', password);
+    } else {
+      await prefs.remove('email');
+      await prefs.remove('password');
+    }
+  }
+
+  Future<Map<String, dynamic>> checkLoginStatus() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    bool isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
+    bool rememberMe = prefs.getBool('rememberMe') ?? false;
+
+    int? loginTimestamp = prefs.getInt('loginTimestamp');
+
+    if (loginTimestamp != null) {
+      DateTime loginDateTime = DateTime.fromMillisecondsSinceEpoch(loginTimestamp);
+      DateTime currentDateTime = DateTime.now();
+      Duration sessionDuration = currentDateTime.difference(loginDateTime);
+
+      if (sessionDuration.inDays > 7) {
+        await prefs.remove('isLoggedIn');
+        await prefs.remove('loginTimestamp');
+        return {'isLoggedIn': false};
+      }
+    }
+
+    if (isLoggedIn || rememberMe) {
+      return {
+        'isLoggedIn': true,
+        'email': prefs.getString('email') ?? '',
+        'password': prefs.getString('password') ?? '',
+      };
+    }
+    return {'isLoggedIn': false};
   }
 }

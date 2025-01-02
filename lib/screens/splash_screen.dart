@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vtrack_for_you/screens/login.dart';
+import 'package:vtrack_for_you/session/session_manager_login.dart';
+
+import '../services/login_service.dart';
+import '../util/snack_bar_util.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -9,18 +14,25 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
+  final LoginService _loginService = LoginService();
+
+
   @override
   void initState() {
-    _login();
+
+    _checkSession();
     super.initState();
   }
 
-  _login() async {
-    await Future.delayed(Duration(milliseconds: 2000), () {
-      Navigator.pushReplacement(
-          context, MaterialPageRoute(builder: (context) => Login()));
-    });
+  Future<void> _checkSession() async {
+    var loginStatus = await _loginService.checkLoginStatus();
+    if (loginStatus['isLoggedIn'] == true) {
+      Navigator.pushReplacementNamed(context, '/tcp_connection');
+    } else {
+      Navigator.pushReplacementNamed(context, '/login');
+    }
   }
+
 
   @override
   Widget build(BuildContext context) {
